@@ -1,5 +1,8 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -38,8 +41,10 @@ std::vector<char> readFile(const std::string& filename) {
     std::string path = "shaders/" + filename;
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file) {
+#ifdef HELLO_TRIANGLE_SHADER_DIR
         path = std::string(HELLO_TRIANGLE_SHADER_DIR) + "/" + filename;
         file.open(path, std::ios::ate | std::ios::binary);
+#endif
     }
     if (!file) {
         throw std::runtime_error("Could not open shader: " + path);
@@ -88,6 +93,8 @@ private:
     std::array<VkFence, kFramesInFlight> inFlight_{};
     size_t currentFrame_ = 0;
     bool framebufferResized_ = false;
+    bool showDemoWindow_ = false;
+    bool imguiVulkanInitialized_ = false;
 
     static void framebufferResizeCallback(GLFWwindow* window, int, int) {
         auto* app = static_cast<HelloTriangleEngine*>(glfwGetWindowUserPointer(window));
@@ -129,6 +136,57 @@ private:
         createSwapchainObjects();
         createCommandBuffers();
         createSyncObjects();
+        initImGui();
+    }
+
+    void initImGuiVulkanBackend() {
+        const auto indices = findQueueFamilies(physicalDevice_);
+        ImGui_ImplVulkan_InitInfo info{};
+        info.ApiVersion = VK_API_VERSION_1_0;
+        info.Instance = instance_;
+        info.PhysicalDevice = physicalDevice_;
+        info.Device = device_;
+        info.QueueFamily = *indices.graphics;
+        info.Queue = graphicsQueue_;
+        info.DescriptorPoolSize = 1000;
+        info.RenderPass = renderPass_;
+        info.MinImageCount = std::max(2u, static_cast<uint32_t>(swapchainImages_.size()));
+        info.ImageCount = static_cast<uint32_t>(swapchainImages_.size());
+        info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        if (!ImGui_ImplVulkan_Init(&info)) {
+            throw std::runtime_error("Dear ImGui Vulkan backend initialization failed");
+        }
+        imguiVulkanInitialized_ = true;
+    }
+
+    void initImGui() {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+        if (!ImGui_ImplGlfw_InitForVulkan(window_, true)) {
+            throw std::runtime_error("Dear ImGui GLFW backend initialization failed");
+        }
+        initImGuiVulkanBackend();
+    }
+
+    void beginImGuiFrame() {
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(330.0f, 150.0f), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Vulkan Engine");
+        ImGui::TextUnformatted("Dear ImGui is running on Vulkan + GLFW.");
+        ImGui::Separator();
+        ImGui::Text("Frame time: %.3f ms", 1000.0f / ImGui::GetIO().Framerate);
+        ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+        ImGui::Checkbox("Show ImGui demo window", &showDemoWindow_);
+        ImGui::TextDisabled("Press Escape to exit");
+        ImGui::End();
+
+        if (showDemoWindow_) ImGui::ShowDemoWindow(&showDemoWindow_);
+        ImGui::Render();
     }
 
     void createInstance() {
@@ -539,6 +597,7 @@ private:
         VkRect2D scissor{{0, 0}, swapchainExtent_};
         vkCmdSetScissor(buffer, 0, 1, &scissor);
         vkCmdDraw(buffer, 3, 1, 0, 0);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), buffer);
         vkCmdEndRenderPass(buffer);
 
         if (vkEndCommandBuffer(buffer) != VK_SUCCESS) {
@@ -588,8 +647,13 @@ private:
             glfwGetFramebufferSize(window_, &width, &height);
         }
         vkDeviceWaitIdle(device_);
+        if (imguiVulkanInitialized_) {
+            ImGui_ImplVulkan_Shutdown();
+            imguiVulkanInitialized_ = false;
+        }
         cleanupSwapchain();
         createSwapchainObjects();
+        initImGuiVulkanBackend();
     }
 
     void drawFrame() {
@@ -645,12 +709,16 @@ private:
     void mainLoop() {
         while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
             glfwPollEvents();
+            beginImGuiFrame();
             drawFrame();
         }
         vkDeviceWaitIdle(device_);
     }
 
     void cleanup() {
+        if (imguiVulkanInitialized_) ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
         cleanupSwapchain();
         for (int i = 0; i < kFramesInFlight; ++i) {
             vkDestroyFence(device_, inFlight_[i], nullptr);

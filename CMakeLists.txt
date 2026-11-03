@@ -7,10 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Vulkan REQUIRED)
+include(FetchContent)
 
 find_package(glfw3 3.3 CONFIG QUIET)
 if(NOT TARGET glfw AND NOT TARGET glfw3::glfw)
-    include(FetchContent)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -31,6 +31,29 @@ elseif(TARGET glfw3::glfw)
 else()
     message(FATAL_ERROR "A GLFW CMake target could not be found or created.")
 endif()
+
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.9b
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+)
+target_include_directories(imgui PUBLIC
+    "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
+)
+target_link_libraries(imgui PUBLIC Vulkan::Vulkan ${GLFW_TARGET})
 
 find_program(GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 find_program(GLSLANG_VALIDATOR glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
@@ -71,7 +94,7 @@ add_custom_target(compile_shaders DEPENDS ${SHADER_BINARIES})
 add_executable(hello_triangle src/main.cpp)
 add_dependencies(hello_triangle compile_shaders)
 
-target_link_libraries(hello_triangle PRIVATE Vulkan::Vulkan ${GLFW_TARGET})
+target_link_libraries(hello_triangle PRIVATE Vulkan::Vulkan ${GLFW_TARGET} imgui)
 target_compile_definitions(hello_triangle PRIVATE
     GLFW_INCLUDE_NONE
     HELLO_TRIANGLE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
